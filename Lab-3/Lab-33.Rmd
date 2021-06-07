@@ -1,0 +1,367 @@
+---
+title: "Untitled"
+author: "Mowniesh Asokan"
+date: "14/05/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r,echo=FALSE}
+
+data<-read.csv("C:/Users/Mowniesh/OneDrive/Desktop/STIMA/4-Bayesian Learning/Lab-3/rainfall.dat",header = FALSE,sep="",dec=".")
+library(knitr)
+library(LaplacesDemon)
+
+```
+# 1.Gibbs Sampler for a Normal Model.
+
+```{r,echo=FALSE}
+
+###1.Gibbs Sampler for a Normal Model.
+
+x<-log(data)
+set.seed(12345)
+n<- nrow(x)
+v_0<-0
+mu_0<-0.5
+tau2_0<-0.5
+sigma2_0<-0.5
+nDraws<-500
+x_hat=mean(x[,1])
+
+
+###a.
+
+Post_param<-function(x,n,sigma2_0,mu_0,tau2_0,v_0,nDraws){
+  # intializing some values
+  x_hat=mean(x[,1])
+  n=n
+  mu<-numeric(nDraws)
+  sigma<-numeric(nDraws)
+  mu[1]<-32
+  sigma[1]<-1000
+  
+  
+  tau2_n=((n/sigma[1])+(1/tau2_0))^(-1)
+  w=n/(sigma[1])/((n/sigma[1])+(1/tau2_0))
+  mu_n=(w*x_hat)+(1-w)*mu_0
+  
+  for(i in 2:nDraws){
+    
+    # mean by using Full conditional posterior  
+    mu[i]<-rnorm(1,mean=mu_n,sd=sqrt(tau2_n))
+    
+    # sigma
+    scale=((v_0*sigma2_0)+sum(x-mu[i-1])^2)/(n+v_0)
+    sigma[i]<-rinvchisq(n=1,df=(n+v_0),scale=scale)
+    
+    
+  }
+  return(list(mu,sigma))
+}
+theta_values<-Post_param(x=x,n=n,sigma2_0 = sigma2_0,mu_0=mu_0,tau2_0 = tau2_0,v_0=4,nDraws=500)
+
+par(mfrow=c(2,2))
+plot(density(theta_values[[1]]),
+     xlab = expression(mu),
+     ylab = "Density",
+     main = "Gibbs mu")
+
+plot(density(theta_values[[2]]),
+     xlab = expression(mu),
+     ylab = "Density",
+     main = "Gibbs mu")
+
+
+# Inefficiency Factor 
+a_Gibbs <- acf(theta_values[[1]])
+b_Gibbs <- acf(theta_values[[2]])
+
+IF_Gibbs_mu <- 1+2*sum(a_Gibbs$acf[-1])
+IF_Gibbs_sigma <-1+2*sum(b_Gibbs$acf[-1])
+
+
+```
+## Plotting the trajectories of the sampled markov chain.
+
+```{r,echo=FALSE}
+
+mu<-theta_values[[1]]
+sigma<-theta_values[[2]]
+cum_mu<-cumsum(mu)/seq(1,1000,1)
+cum_sigma<-cumsum(sigma)/seq(1,1000,1)
+
+par(mfrow=c(1,2))
+#Analyszing the convergence
+plot(cum_mu,type = "l",
+     xlab = "Iteration",
+     ylab = expression(mu))
+abline(h=x_hat ,col = "red")
+plot(cum_sigma,type='l',
+     xlab = "Iteration",
+     ylab = expression(sigma^2))
+abline(h=sd(x[,1]), col = "red")
+```
+
+## b.Histogram or Kernel Density Estimates of Posterior distibution
+```{r,echo=FALSE}
+
+## b.Histogram or Kernel Density Estimates of Posterior distibution
+
+
+#pred_deinsity<-dnorm(data$V1,mean=s,sd = max(sigma))
+hist(as.numeric(data$V1),freq = F,breaks=30)
+
+```
+
+# 2.Metropolis Random Walk for poisson Regression
+
+## a.Maximum Likelihood Estimator of Beta.
+From the given ebaynumber of Bidders data we found that the most significant covariate is ratio of minimum selling price to the book value (MinBidShare).Because that covariate has the highest number of negative influence on the number of Bids.
+```{r,echo=FALSE}
+
+###Metropolis Random Walk for poisson Regression
+
+edata<-read.table(file="C:/Users/Mowniesh/OneDrive/Desktop/STIMA/4-Bayesian Learning/Lab-3/eBayNumberOfBidderData.dat",header=TRUE)
+library(mvtnorm)
+
+##a.Beta parameters
+
+x<-edata[3:10]
+y<-edata[,1]
+
+max_llhood_beta<-glm.fit(x=x,y=y,family = poisson())
+#max_llhood_beta$coefficients
+knitr::kable(t(max_llhood_beta$coefficients))
+```
+
+## b.Bayesian Analysis in poisson regression
+
+The optimum beta values shown below.
+
+```{r,echo=FALSE}
+## b.Bayesian Analysis in poisson regression
+
+
+m<-nrow(x)
+n<-ncol(x)
+
+mu = as.matrix(rep(0,n))  # Prior mean vector
+sigma=100*(solve(t(x)%*%as.matrix(x)))
+
+logPostPoisson <- function(theta, y,X, mu,Sigma){
+  
+  linPred = as.matrix(X)%*%theta
+  logLik = sum( linPred*y -exp(linPred) )
+  logPrior = dmvnorm(theta, mean = mu, Sigma, log = TRUE)
+  return(logLik + logPrior)
+}
+
+# Initialize Betas
+initVal = matrix(0,n,1)
+
+OptimRes <- optim(initVal,logPostPoisson,gr=NULL,y,x,mu,sigma,method=c("BFGS"),control=list(fnscale=-1),hessian=TRUE)
+
+cv<-colnames(x)
+beta_tilda<-t(OptimRes$par)
+colnames(beta_tilda)<-cv
+
+j_beta_tilda<--solve(OptimRes$hessian)
+knitr::kable(beta_tilda)
+
+posterior_beta<-rmvnorm(5000,beta_tilda,j_beta_tilda)
+colnames(posterior_beta)<-cv
+knitr::kable(posterior_beta[1:8,])
+
+```
+Above shown data.frame is representing the first eight values of posterior beta estimated from the Multivariate normal distribution.
+
+
+## c.Metropolos Function On Poisson Regression.
+By using the Random metropolis Hasting Algorithm we found the theta values.In this function we use the likelihood of the poisson regression from [1] and the logpost is function that we simulated in the question 2.
+
+```{r}
+
+##Metropolis function
+
+RWMSampler<-function(logPost,niter,c,...){
+  
+  theta<-matrix(data=0,nrow = niter,ncol=8)
+  
+  theta[1,]<-c(-0.01,0.3,-0.01,0.3,0.09,-0.2,-0.5,0.1)
+  
+  for (i in 2:niter){
+    theta_p <-rmvnorm(1,theta[i-1,],c*j_beta_tilda)
+    
+    p_theta_p = logPost(theta_p[1,],...)
+    
+    p_theta_i1= logPost(theta[i-1,],...)
+    
+    post_ratio = exp((p_theta_p)-(p_theta_i1))
+    alpha = min(1,post_ratio)
+    
+    u=runif(1,0,1)
+    
+    if(u < alpha){
+      theta[i,]=theta_p
+    }
+    else{
+      theta[i,]=theta[i-1,]
+    }
+    
+  }
+  return(theta)
+}
+
+theta_v<-RWMSampler(logPost =logPostPoisson,niter=1000,c=1,y,x,mu,sigma)
+
+
+par(mfrow=c(3,3))
+for(i in 1:8){
+    plot(theta_v[,i],type="l",xlab=cv[i])
+    abline(h=beta_tilda[i],col="Green")
+}
+
+
+
+```
+Above shown figure descirbes how beta values of each features are generated from the RWMSampler function and the green line explain optimal beta values of this data.
+
+## d.Plot the Predictive Distribution.
+```{r,echo=FALSE}
+
+
+
+fs<-c(1,1,1,0,1,0,1,0.7)
+
+new_auction<-as.matrix(c(1,1,1,0,1,0,1,0.7))
+
+pred<-theta_v%*%new_auction
+
+
+pred_dist<-c()
+for (i in 1:length(pred)){
+  pred_dist[i]<-rpois(1,exp(pred[i]))
+}
+
+hist(pred_dist,freq=F,xlab="nBids")
+
+n0_bids<-length(which(pred_dist==0))/length(pred_dist)
+
+
+cat("The probabilty of no bidders in this new auction is ",n0_bids)
+```
+## 3. Time series models in Stan
+
+### a.R function to simulate a data.
+The AR[1] values are generated by  using $$x_t$$ function and where phi values of -1 to 1 are used to check the stationary values.
+Where the plot shown below explains how the value  of $x_t$ will converges according to the phi value.
+```{r,echo=FALSE}
+
+#a. AR.1 Function
+library(ggplot2)
+library(rstan)
+library(knitr)
+
+ar<-function(mu,sigma_sq,t,phi){
+  xt=rep(0,t)
+  xt[1]=1
+  mu=mu
+  sigma_sq=sigma_sq
+  for(i in 2:t){
+    xt[i]<-mu+phi*((xt[i-1])-mu)+rnorm(1,0,sigma_sq)
+  }
+  return(xt)
+}
+
+g<-seq(-1,1,0.1)
+# j<-matrix(0,nrow = 200,ncol = length(g))
+# for(i in 1:length(g)){
+#   j[,i] <- ar(20,4,200,g[i])
+#   plot(j[,i],type="l",)
+# 
+# }
+op<-ar(20,4,200,0.1)
+plot(op,type="l",ylab="AR[1]")
+
+```
+
+
+### b. Posterior mean and Credible intervals
+```{r,echo=FALSE}
+
+StanModel='
+data{
+  int<lower = 0> N;
+  vector[N] y;
+}
+
+parameters{
+  real mu;
+  real phi;
+  real<lower=0> sigma2;
+  
+}
+
+model{
+ mu ~ normal(0,100);
+ sigma2 ~ scaled_inv_chi_square(0.1,2);
+ phi ~ normal(0,1);
+ for(i in 2:N){
+  y[i] ~ normal(mu + phi*(y[i-1]-mu), sqrt(sigma2));
+ }
+}
+'
+y_n<-ar(20,40,200,0.9)
+
+data1<-list(N=length(y_n),y=y_n)
+
+warmup <- 1000
+niter <- 2000
+fit1 <- stan(model_code = StanModel,data=data1,warmup=warmup,iter=niter,chain=1,cores=2)
+
+#95% credible intervals
+kable(summary(fit1, probs = c(0.025, 0.975))$summary)
+
+model1<-extract(fit1)
+```
+
+### Joint Posterior of mu and phi are shown below
+```{r,echo=FALSE}
+joint1 = cbind("mu_y" = model1$mu, "phi_y" = model1$phi)
+pairs(joint1, main = "Joint Posterior of mu and phi")
+```
+
+
+
+```{r,echo=FALSE}
+x_n<-ar(20,40,200,0.3)
+
+data2<-list(N=length(x_n),y=x_n)
+set.seed(123456)
+warmup <- 1000
+niter <- 2000
+fit2 <- stan(model_code = StanModel,data=data2,warmup=warmup,iter=niter,chain=1,cores=2)
+model2<-extract(fit2)
+
+#95% Credible intervals
+kable(summary(fit2, probs = c(0.025, 0.975))$summary)
+
+
+
+joint2 = cbind("mu_x" = model2$mu, "phi_x" = model2$phi)
+pairs(joint2, main = "Joint Posterior of mu and phi")
+
+```
+## Referrences
+
+https://en.wikipedia.org/wiki/Poisson_regression
+
+
+# Appendix: All code for this report
+
+```{r ref.label=knitr::all_labels(), echo=TRUE, eval=FALSE}
+```
